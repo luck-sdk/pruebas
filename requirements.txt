@@ -1,4 +1,5 @@
-flask
-flask-sqlalchemy
+Flask
+Flask-SQLAlchemy
+SQLAlchemy
 pyodbc
 gunicorn
