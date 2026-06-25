@@ -64,4 +64,3 @@ jobs:
         with:
           app-name: 'rtx'
           slot-name: 'Production'
-          
