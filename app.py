@@ -1,20 +1,22 @@
 from flask import Flask, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
-from sqlalchemy import func
+from sqlalchemy import func, text
 import os
 import logging
 import time
+import urllib.parse
 
 app = Flask(__name__)
 
-# Configurar logging
+# ======================
+# LOGGING
+# ======================
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ======================
-# DB CONFIG - CON TU CONEXIÓN
+# CONEXIÓN AZURE SQL (CORREGIDA)
 # ======================
-# 🔥 USANDO TU CADENA DE CONEXIÓN DIRECTA
 SQL_CONNECTION = (
     "DRIVER={ODBC Driver 17 for SQL Server};"
     "SERVER=tcp:jhe.database.windows.net,1433;"
@@ -24,19 +26,31 @@ SQL_CONNECTION = (
     "Encrypt=yes;"
     "TrustServerCertificate=no;"
     "Connection Timeout=30;"
-    "Login Timeout=30;"
 )
 
-app.config["SQLALCHEMY_DATABASE_URI"] = SQL_CONNECTION
+params = urllib.parse.quote_plus(SQL_CONNECTION)
+
+app.config["SQLALCHEMY_DATABASE_URI"] = (
+    "mssql+pyodbc:///?odbc_connect=" + params
+)
+
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+    "pool_pre_ping": True,
+    "pool_recycle": 1800,
+    "pool_size": 5,
+    "max_overflow": 10,
+    "pool_timeout": 30,
+}
 
 db = SQLAlchemy(app)
 
 # ======================
-# MODEL
+# MODELO
 # ======================
 class Medicion(db.Model):
     __tablename__ = "mediciones"
+
     id = db.Column(db.Integer, primary_key=True)
     fecha = db.Column(db.DateTime, server_default=func.current_timestamp())
     alcohol = db.Column(db.Float, nullable=False)
@@ -49,6 +63,16 @@ class Medicion(db.Model):
         }
 
 # ======================
+# INIT SEGURA (NO CRASHEA AZURE)
+# ======================
+with app.app_context():
+    try:
+        db.session.execute(text("SELECT 1"))
+        logger.info("✅ Conexión a Azure SQL OK")
+    except Exception as e:
+        logger.error(f"❌ Error conexión BD: {e}")
+
+# ======================
 # ROUTES
 # ======================
 
@@ -56,12 +80,14 @@ class Medicion(db.Model):
 def home():
     return jsonify({
         "status": "OK",
-        "message": "API funcionando con Azure SQL 🚀",
+        "message": "API funcionando en Azure 🚀",
         "database": "jhe.database.windows.net/jp",
         "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
     })
 
-# 📥 INSERTAR (ESP32)
+# ======================
+# INSERTAR (ESP32)
+# ======================
 @app.route("/mediciones", methods=["POST"])
 def insertar():
     try:
@@ -70,14 +96,10 @@ def insertar():
         if not data or "alcohol" not in data:
             return jsonify({"error": "Falta alcohol"}), 400
 
-        try:
-            alcohol = float(data["alcohol"])
-            if alcohol < 0:
-                return jsonify({"error": "El alcohol no puede ser negativo"}), 400
-            if alcohol > 100:
-                return jsonify({"error": "El alcohol no puede ser mayor a 100"}), 400
-        except (ValueError, TypeError):
-            return jsonify({"error": "Alcohol inválido"}), 400
+        alcohol = float(data["alcohol"])
+
+        if alcohol < 0 or alcohol > 100:
+            return jsonify({"error": "Valor inválido (0-100)"}), 400
 
         nuevo = Medicion(alcohol=alcohol)
         db.session.add(nuevo)
@@ -89,24 +111,28 @@ def insertar():
 
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Error en insertar: {e}")
+        logger.error(f"Error insertar: {e}")
         return jsonify({"error": str(e)}), 500
 
-# 📤 LISTAR
+# ======================
+# LISTAR
+# ======================
 @app.route("/mediciones", methods=["GET"])
 def listar():
     try:
         datos = Medicion.query.order_by(Medicion.id.desc()).all()
+
         return jsonify({
             "total": len(datos),
-            "data": [d.to_dict() for d in datos],
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "data": [d.to_dict() for d in datos]
         })
+
     except Exception as e:
-        logger.error(f"Error en listar: {e}")
         return jsonify({"error": str(e)}), 500
 
-# 📤 ÚLTIMO
+# ======================
+# ÚLTIMA
+# ======================
 @app.route("/mediciones/ultima", methods=["GET"])
 def ultima():
     try:
@@ -116,27 +142,25 @@ def ultima():
             return jsonify({"message": "sin datos"}), 404
 
         return jsonify(dato.to_dict())
+
     except Exception as e:
-        logger.error(f"Error en ultima: {e}")
         return jsonify({"error": str(e)}), 500
 
-# 🏥 HEALTH CHECK
+# ======================
+# HEALTH CHECK (AZURE)
+# ======================
 @app.route("/health", methods=["GET"])
 def health():
     try:
-        db.session.execute("SELECT 1")
+        db.session.execute(text("SELECT 1"))
         return jsonify({
             "status": "healthy",
-            "database": "connected",
-            "server": "jhe.database.windows.net",
-            "database_name": "jp",
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "database": "connected"
         })
     except Exception as e:
         return jsonify({
             "status": "unhealthy",
-            "error": str(e),
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+            "error": str(e)
         }), 500
 
 # ======================
