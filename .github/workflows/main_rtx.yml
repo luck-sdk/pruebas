@@ -30,7 +30,6 @@ jobs:
         with:
           name: python-app
           path: .
-          exclude: antenv/
 
   deploy:
     runs-on: ubuntu-latest
