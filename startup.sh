@@ -17,4 +17,5 @@ echo "✅ Drivers instalados:"
 odbcinst -q -d
 
 echo "🚀 Iniciando Gunicorn..."
-gunicorn --bind=0.0.0.0 --timeout=300 --workers=2 --threads=4 wsgi:app
+# ✅ Apuntando directamente a app:app (sin wsgi.py)
+gunicorn --bind=0.0.0.0 --timeout=300 --workers=2 --threads=4 app:app
